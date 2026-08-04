@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import os
+import urllib.parse
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -92,7 +93,16 @@ def make_session(
 
 
 def _dig(obj: Any, path: str) -> Any:
-    """Navigate a dot path (e.g. 'data.movies') through dicts/lists."""
+    """Navigate a dot path (e.g. 'data.movies') through dicts/lists.
+
+    A bare '$' (or '$.' prefix) means the root itself — used by definitions
+    whose rows selector renders to '$' (e.g. TPB apibay JSON array).
+    """
+    path = path.strip()
+    if path in ("$", "$."):
+        return obj
+    if path.startswith("$."):
+        path = path[2:]
     cur = obj
     for part in [p for p in path.split(".") if p]:
         if isinstance(cur, dict):
@@ -317,6 +327,15 @@ def search(
     releases: list = []
     for spath in spec.paths:
         url = _template.render(spath.path, context)
+        # Cardigann 允许相对路径（相对站点主域），拼上 sitelink
+        if url and not url.startswith(("http://", "https://")):
+            base = config.get("sitelink") or (definition.links[0] if definition.links else "")
+            url = base.rstrip("/") + "/" + url.lstrip("/")
+        # 路径段做 URL 编码（requests 只编 query 不编 path；关键词含空格会炸）。
+        # 只编码 path 段，query/fragment 原样保留交给 requests
+        _parts = urllib.parse.urlsplit(url)
+        _enc_path = "/".join(urllib.parse.quote(seg, safe="") for seg in _parts.path.split("/"))
+        url = urllib.parse.urlunsplit((_parts.scheme, _parts.netloc, _enc_path, _parts.query, _parts.fragment))
         inputs = dict(spec.inputs)
         inputs.update(spath.inputs)
         params = {
@@ -336,6 +355,9 @@ def search(
                 payload = resp.json()
             except ValueError as exc:
                 raise EngineError(f"invalid JSON from {url}: {exc}") from exc
+            # rows/字段选择器本身可能是模板（如 TPB 的 ${{ if .Config.uploader }}...{{ end }}）
+            if isinstance(spec.rows.selector, str) and "{{" in spec.rows.selector:
+                spec.rows.selector = _template.render(spec.rows.selector, context)
             rows = _json_rows(payload, spec.rows)
         else:
             soup = BeautifulSoup(resp.text, "html.parser")

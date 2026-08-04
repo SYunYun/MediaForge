@@ -1,46 +1,63 @@
-# Mediaforge
+# Mediaforge — Agent-native media stack toolbox
 
-Agent 原生媒体栈工具箱（开源项目）。
+**Hunt module: a Cardigann-format indexer interpreter + search/pick/add pipeline
+that replaces the Prowlarr position in an agent-native way.**
 
-## 模块一：hunt —— Cardigann 索引器引擎
+Mediaforge exists because the big media components (Jellyfin/qBittorrent/Prowlarr)
+are muscle we don't need to rebuild — but the *thin* parts worth owning are the
+ones whose value lives in community-maintained definitions. We stand on those
+definitions and rewrite the thin shell as agent-native code.
 
-`mediaforge.cardigann` 是 Jackett/Prowlarr Cardigann YAML 索引器定义的解释器子集：
-加载社区 YAML 卡（500+ 站点），渲染 Go 模板子集，执行搜索，输出统一 Release。
+## Design tenets
 
-```python
-from mediaforge.cardigann import load_definition, search, Query
+1. **Tools for agents differ from tools for humans.** Agents retry, time out, and
+   restart from scratch — every write must be idempotent, every error loud.
+2. **Path mapping / configuration is derived, never memorized.** No guessing,
+   no human memory as the source of truth.
+3. **Taste stays with the human.** The machine hunts, scores, and feeds; naming
+   and final selection belong to the owner.
 
-d = load_definition("tests/fixtures/yts.yml")
-releases = search(d, Query(keywords="inside job"))
-for r in releases:
-    print(r["title"], r["seeders"], r["infohash"])
-```
-
-### 子模块
-
-| 模块 | 职责 |
-|---|---|
-| `template.py` | Go 模板子集渲染器（变量 / if-else 嵌套 / eq/and/or/not），手写 tokenizer+递归解析 |
-| `filters.py` | 滤镜管道：replace, re_replace, append, prepend, trim, tolower, toupper, split, join, case, querystring |
-| `definition.py` | YAML 卡 → Definition dataclass；settings default 与用户配置合并 |
-| `engine.py` | 搜索执行器：渲染 path/inputs → requests → json 点路径 / html CSS 选择器抽取 → Release dict |
-| `loader.py` | 定义仓库：jsdelivr 拉 Jackett 卡，缓存 ~/.cache/mediaforge/indexers/ |
-
-### 开发
+## Quick start
 
 ```bash
-python3 -m venv .venv
-.venv/bin/pip install -i https://pypi.tuna.tsinghua.edu.cn/simple requests pyyaml beautifulsoup4 pytest
-.venv/bin/python -m pytest tests/
+pip install mediaforge-ctl
+
+mediaforge indexers update          # pull community indexer definitions
+mediaforge search "inside job"      # multi-indexer search, scored & sorted
+mediaforge pick "inside job" --index 3   # pick by rank
+mediaforge add <magnet|infohash>    # idempotent qbit feed (infohash dedup)
+mediaforge config show              # ~/.config/mediaforge/config.yaml
 ```
 
-### 已知不支持的 Cardigann 特性
+All commands emit JSON with `--json` — the same surface an agent uses.
 
-- 登录/session 流（login block、cookie 处理、验证码）
-- download 段（种子文件下载与改写，仅输出 download URL）
-- 模板函数全集（仅 if/eq/and/or/not；无 range/len/join 等管道函数）
-- 滤镜：dateparse、regexp、validfilename、timeago 等未实现
-- headers/cookies/ratelimit（requestDelay）、followredirect 等请求级配置
-- rows 多 selector 数组、field selector 数组（fallback 链）
-- caps 段仅解析不用于过滤；categorymappings 未参与搜索
-- imdbid 之外的高级查询字段（tmdbid/season/ep 模板变量已解析但依赖定义支持）
+## Architecture
+
+```
+mediaforge
+├── cardigann/   # Go-template-subset renderer + filter pipeline + definition engine
+├── hunt/        # search orchestration + health scoring (seeders/size bands/groups)
+└── feed/        # idempotent qbit client (5.x quirks built in)
+```
+
+Definitions are **not** bundled: fetched from the Jackett community repo on
+first use and cached under `~/.cache/mediaforge/indexers/`.
+
+## Roadmap
+
+- [x] hunt: Cardigann interpreter (subset) — 66 tests
+- [x] hunt: search/pick/add CLI + scoring + idempotent qbit feed — 116 tests
+- [ ] hunt: more HTML indexers, proxy-aware retry, torrent health diagnostics
+- [ ] subs: agent-native subtitle engine (replacing the Bazarr position) —
+      core already exists as battle-tested scripts (SubHD pipeline, bilingual
+      synthesis, alignment, QA)
+
+## Known gaps (honest)
+
+- Go-regexp `\p{...}` unicode classes not supported by Python `re` — the filter
+  is skipped with a warning (e.g. TPB's CJK-normalization filter).
+- Sites behind Cloudflare Turnstile (1337x, EZTV, KAT) are unusable from scripts;
+  mirror rotation is the practical answer, not headless-browser heroics.
+- Login/captcha-protected indexers are out of scope for v0.1.
+
+See `docs/pitfalls.md` for the war stories behind the design decisions.

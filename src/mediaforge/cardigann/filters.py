@@ -6,9 +6,16 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import urllib.parse
 from typing import Any, Callable, Union
+
+_log = logging.getLogger("mediaforge.cardigann.filters")
+
+
+def _warn(msg: str) -> None:
+    _log.warning(msg)
 
 Value = Union[str, list]
 
@@ -34,7 +41,12 @@ def _f_replace(value: Any, old: str, new: str = "") -> Value:
 
 def _f_re_replace(value: Any, pattern: str, repl: str = "") -> Value:
     was_list = isinstance(value, list)
-    rx = re.compile(pattern)
+    try:
+        rx = re.compile(pattern)
+    except re.error as exc:
+        # Go regexp 与 Python re 语法差异（\p{L} 等 unicode 类）——跳过该滤镜但留痕
+        _warn(f"re_replace pattern {pattern!r} not valid Python regex, skipped: {exc}")
+        return value
     return _unwrap([rx.sub(repl, s) for s in _to_list(value)], was_list)
 
 
