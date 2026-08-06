@@ -43,14 +43,34 @@ mediaforge
 Definitions are **not** bundled: fetched from the Jackett community repo on
 first use and cached under `~/.cache/mediaforge/indexers/`.
 
-## Roadmap
+## Roadmap — 完全体（the full form）
+
+**Endgame: one daemon replaces the whole arr stack.** `hunt → get → organize → subs`,
+all agent-native. The final media stack is just **MediaForge + Jellyfin**.
+
+```
+mediaforged   (resident daemon · FastAPI on localhost · systemd user)
+├── hunt      ✅ Cardigann interpreter + search/pick/add + scoring — 116 tests
+├── subs      ⬜ subtitle engine (SubHD pipeline, bilingual synthesis, alignment, QA)
+├── get       ⬜ embedded libtorrent session — dual backend: libtorrent | qbit
+└── organize  ⬜ hardlink import + naming + Jellyfin refresh (ports from media-ctl)
+
+mediaforge (CLI) = thin client talking to the daemon over localhost
+```
 
 - [x] hunt: Cardigann interpreter (subset) — 66 tests
 - [x] hunt: search/pick/add CLI + scoring + idempotent qbit feed — 116 tests
-- [ ] hunt: more HTML indexers, proxy-aware retry, torrent health diagnostics
-- [ ] subs: agent-native subtitle engine (replacing the Bazarr position) —
-      core already exists as battle-tested scripts (SubHD pipeline, bilingual
-      synthesis, alignment, QA)
+- [ ] subs: agent-native subtitle engine — core already battle-tested scripts
+      (SubHD pipeline, bilingual synthesis, alignment, QA)
+- [ ] get: daemon + embedded libtorrent session (`--engine libtorrent|qbit`);
+      switches after the 174G seeding debt clears
+- [ ] organize: hardlink import + Sxx parsing + idempotent inode dedup +
+      Jellyfin refresh (generalizes media-ctl intake/hook)
+- [ ] hunt+: more HTML indexers, proxy-aware retry, torrent health diagnostics
+
+Daemon invariants: idempotent writes · derived (never memorized) config ·
+everything JSON self-describing (OpenAPI) · taste stays with the human —
+selection, naming, and collector-grade subtitle calls are human decisions.
 
 ## Known gaps (honest)
 
