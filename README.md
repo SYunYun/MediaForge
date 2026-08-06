@@ -1,4 +1,4 @@
-# Mediaforge — Agent-native media stack toolbox
+# MediaForge — Agent-native media stack toolbox
 
 **Hunt module: a Cardigann-format indexer interpreter + search/pick/add pipeline
 that replaces the Prowlarr position in an agent-native way.**
