@@ -125,13 +125,23 @@ def load_config(env: Optional[dict] = None) -> dict:
         "proxy": "",
         "timeout": 12,
         "indexers": list(DEFAULT_INDEXERS),
+        "subs": {
+            "media": {
+                "backend": "filesystem",
+                "root": "/media/Media",
+                "library": "Shows",
+            },
+            "naming": {
+                "ass_suffix": ".default.chi.zh-cn.ass",
+            },
+        },
     }
     if CONFIG_PATH.exists():
         try:
             file_cfg = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8")) or {}
         except yaml.YAMLError as exc:
             raise ConfigError(f"{CONFIG_PATH} 解析失败: {exc}") from exc
-        for section in ("qbit", "hunt"):
+        for section in ("qbit", "hunt", "subs"):
             if isinstance(file_cfg.get(section), dict):
                 cfg[section].update(file_cfg[section])
         for key in ("proxy", "timeout", "indexers"):

@@ -24,6 +24,7 @@ from .cardigann.loader import DefinitionLoader
 from .config import CONFIG_PATH, ensure_config, load_config, redact
 from .feed.qbit import QbitClient, QbitError, to_magnet
 from .hunt.score import rank_releases
+from .subs import cli as subs_cli
 
 MAX_WORKERS = 4  # 项目铁律：不做 24 线程重活
 
@@ -245,7 +246,7 @@ def cmd_config(args, cfg) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="mediaforge",
-        description="Agent 原生媒体栈工具箱 —— hunt（找种）模块",
+        description="Agent 原生媒体栈工具箱 —— hunt（找种）+ subs（字幕）模块",
     )
     parser.add_argument("--version", action="version", version=f"mediaforge {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -286,6 +287,21 @@ def build_parser() -> argparse.ArgumentParser:
     p_config.add_argument("--force", action="store_true", help="init 时覆盖现有配置")
     p_config.add_argument("--json", action="store_true")
     p_config.set_defaults(func=cmd_config)
+
+    p_subs = sub.add_parser("subs", help="字幕体检 / 台账（Agent 自愈闭环）")
+    ssub = p_subs.add_subparsers(dest="sub", required=True)
+
+    p_inspect = ssub.add_parser("inspect", help="体检一个季（Start/End 双检 + 断裂/End偏短判定）")
+    p_inspect.add_argument("show", help="剧名（如 'Rick and Morty'）")
+    p_inspect.add_argument("season", help="季（如 'Season 06'）")
+    p_inspect.add_argument("--json", action="store_true")
+    p_inspect.set_defaults(func=subs_cli.cmd_inspect)
+
+    p_ledger = ssub.add_parser("ledger", help="查看某季台账")
+    p_ledger.add_argument("show")
+    p_ledger.add_argument("season")
+    p_ledger.add_argument("--json", action="store_true")
+    p_ledger.set_defaults(func=subs_cli.cmd_ledger)
 
     return parser
 
