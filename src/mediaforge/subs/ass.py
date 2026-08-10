@@ -147,6 +147,29 @@ def shift_ass_file(path: str, cue_list: list[AssCue], shift: float,
     return changed
 
 
+def shift_window_ass_file(path: str, cue_list: list[AssCue], shift: float,
+                          cut_start: float, cut_end: float) -> int:
+    """把 start 落在 [cut_start, cut_end] 窗口内的 cue 平移 shift 秒。
+
+    分段偏移（segment）修复用：只动错位区段，不动正常区段。返回修改行数。
+    """
+    lines = open(path, encoding="utf-8", errors="ignore").readlines()
+    changed = 0
+    for cue in cue_list:
+        if not (cut_start <= cue.start <= cut_end):
+            continue
+        parts = cue.raw.split(",", 9)
+        if len(parts) < 10:
+            continue
+        parts[1] = sec2ts(cue.start + shift)
+        parts[2] = sec2ts(cue.end + shift)
+        lines[cue.line_idx] = ",".join(parts)
+        changed += 1
+    with open(path, "w", encoding="utf-8") as f:
+        f.writelines(lines)
+    return changed
+
+
 def extend_ends_ass_file(path: str, cue_list: list[AssCue], delta: float,
                          min_dur: float = 0.05) -> int:
     """把每条 Dialogue 的 End 延长 delta 秒（Start 不动）—— End 偏短修复。

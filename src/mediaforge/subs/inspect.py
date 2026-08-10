@@ -6,9 +6,10 @@
 - End 差：  ASS.end   - SDH.end
 - 判定序列：
     1. 片中断裂：前段(<720s)与后段(>=720s)的 Start 中位差缺口 >0.5s
-    2. 均匀错轴：整体 Start 中位差 |med| >0.6s
-    3. End 偏短：Start 已对齐但 End 中位差 < -0.5s
-    4. 正常：全部落在惯例区间（-0.4~+0.2s）
+    2. 分段偏移：偏移曲线上存在持续(>30s)偏离基线(>1s)的区段（变点检测）
+    3. 均匀错轴：整体 Start 中位差 |med| >0.6s
+    4. End 偏短：Start 已对齐但 End 中位差 < -0.5s
+    5. 正常：全部落在惯例区间（-0.4~+0.2s）
 输出：每集判定 + 可复检的数值。
 """
 from __future__ import annotations
@@ -32,6 +33,11 @@ CUT = 720.0
 MATCH_WIN = 5.0
 # SDH 匹配最少共同词
 MIN_COMMON = 2
+# 分段偏移（segment）变点检测参数
+SEG_WIN = 4        # 偏移曲线滑动窗口中位数半窗（±N 条 cue）
+SEG_DEV = 1.0      # 区段偏离基线的判定阈值（秒）
+SEG_MERGE_GAP = 20.0  # 相邻偏离簇合并的最大秒距（容忍区内偶发噪声）
+SEG_MIN_DUR = 30.0    # 区段最小时长（秒）
 
 
 @dataclass
@@ -47,6 +53,11 @@ class EpResult:
     front_med: Optional[float] = None   # 前段(<720s) Start 中位
     back_med: Optional[float] = None    # 后段(>=720s) Start 中位
     verdict: str = "no_ass"
+    # 分段偏移：最显著区段（变点检测产物）
+    seg_cut_start: Optional[float] = None  # 区段起始（s）
+    seg_cut_end: Optional[float] = None    # 区段结束（s）
+    seg_shift: Optional[float] = None      # 区段内中位偏移（s）
+    seg_n: int = 0                         # 区段命中的 cue 数
 
     @property
     def ok(self) -> bool:
@@ -88,6 +99,69 @@ def _med(vals: list[float]) -> Optional[float]:
     return s[len(s) // 2]
 
 
+def detect_segments(offsets: list[tuple[float, float]],
+                    win: int = SEG_WIN, dev: float = SEG_DEV,
+                    merge_gap: float = SEG_MERGE_GAP,
+                    min_dur: float = SEG_MIN_DUR) -> list[dict]:
+    """在偏移曲线上做变点检测，找出持续偏离基线的区段。
+
+    offsets: 按 cue.start 升序的 (cue.start, d_start) 列表。
+    方法（滑动窗口中位数法）：
+      1. 以每个点为心取 ±win 邻域，算出局部中位偏移 -> 平滑曲线（天然抗单点匹配噪声）
+      2. 基线 = 平滑曲线中位数（正常段占多数，区段不显著拉偏）
+      3. 标记 |平滑值 - 基线| > dev 的点为"偏离"，聚成连续簇
+      4. 按时间把相距 < merge_gap 的簇合并（容忍区段内偶发回弹）
+      5. 保留时长 > min_dur 的区段；shift = 区段内原始偏移的中位
+    返回 [{cut_start, cut_end, shift, n, dur}, ...]（时长降序）。
+    """
+    n = len(offsets)
+    if n < 2:
+        return []
+    starts = [o[0] for o in offsets]
+    ds = [o[1] for o in offsets]
+    # 1) 平滑曲线
+    sm = [_med(ds[max(0, i - win):min(n, i + win + 1)]) for i in range(n)]
+    sm = [x if x is not None else 0.0 for x in sm]
+    # 2) 基线
+    base = _med(sm)
+    if base is None:
+        return []
+    # 3) 偏离簇
+    clusters = []
+    cur: Optional[list] = None
+    for i, v in enumerate(sm):
+        if abs(v - base) > dev:
+            if cur is None:
+                cur = [i, i]
+            else:
+                cur[1] = i
+        elif cur is not None:
+            clusters.append(cur)
+            cur = None
+    if cur is not None:
+        clusters.append(cur)
+    # 4) 时间合并
+    merged: list[list] = []
+    for lo, hi in clusters:
+        if merged and starts[lo] - merged[-1][2] < merge_gap:
+            merged[-1][1] = hi
+            merged[-1][2] = starts[hi]
+        else:
+            merged.append([lo, hi, starts[hi]])
+    # 5) 过滤 + shift
+    segs = []
+    for lo, hi, _ in merged:
+        dur = starts[hi] - starts[lo]
+        shift = _med(ds[lo:hi + 1])
+        if dur > min_dur and shift is not None and abs(shift - base) > dev:
+            segs.append({
+                "cut_start": starts[lo], "cut_end": starts[hi],
+                "shift": shift, "n": hi - lo + 1, "dur": dur,
+            })
+    segs.sort(key=lambda s: -s["dur"])
+    return segs
+
+
 def inspect_episode(mkv: str, ass_path: str, srt_tmp: str = "/tmp/mf_subs_sdh.srt"
                     ) -> EpResult:
     """体检一集。返回 EpResult。"""
@@ -127,32 +201,51 @@ def inspect_with_sdh(ass_path: str, sdh: list[tuple[float, float, str]],
     front_med = _med(front)
     back_med = _med(back)
 
+    # 分段偏移变点检测：按 cue.start 升序的 (start, d_start) 偏移曲线
+    offsets = sorted((cue.start, cue.start - st) for (cue, st, en) in matched)
+    segments = detect_segments(offsets)
+
     result = EpResult(
         ep=ep, mkv=mkv, has_ass=True,
         n_cues=len(ass_cues), n_matched=len(matched),
         start_med=start_med, end_med=end_med, front_med=front_med,
         back_med=back_med,
     )
-    result.verdict = judge(start_med, end_med, front_med, back_med)
+    if segments:
+        # 最显著（时长最长）区段
+        seg = segments[0]
+        result.seg_cut_start = seg["cut_start"]
+        result.seg_cut_end = seg["cut_end"]
+        result.seg_shift = seg["shift"]
+        result.seg_n = seg["n"]
+    result.verdict = judge(start_med, end_med, front_med, back_med, segments)
     return result
 
 
 def judge(start_med: Optional[float], end_med: Optional[float],
-          front_med: Optional[float], back_med: Optional[float]) -> str:
-    """按体检数值判定。返回 verdict 字符串。"""
+          front_med: Optional[float], back_med: Optional[float],
+          segments: Optional[list] = None) -> str:
+    """按体检数值判定。返回 verdict 字符串。
+
+    segments 非空即判 segment（局部重症，优先于 end_short/uniform 的聚合指标——
+    大区段会拉偏整体中位，须先从曲线上抓出来）。
+    """
     if start_med is None:
         return "no_match"
     # 1) 片中断裂：前后段缺口
     if front_med is not None and back_med is not None \
             and abs(back_med - front_med) > BREAK_GAP:
         return "break"
-    # 2) 均匀错轴
+    # 2) 分段偏移：持续偏离基线的区段（变点检测已算）——重症优先
+    if segments:
+        return "segment"
+    # 3) 均匀错轴
     if abs(start_med) > UNIFORM_THRESHOLD:
         return "uniform"
-    # 3) End 偏短（Start 已对齐但 End 偏早）
+    # 4) End 偏短（Start 已对齐但 End 偏早）-> 轻症
     if end_med is not None and end_med < -0.5:
         return "end_short"
-    # 4) 正常
+    # 5) 正常
     if START_OK_LO <= start_med <= START_OK_HI:
         return "ok"
     return "slight"

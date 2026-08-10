@@ -6,6 +6,7 @@
 修复映射（judge verdict -> 操作）：
 - uniform   均匀错轴：整体平移 -start_med（Start/End 同移）
 - break     片中断裂：后段(>=CUT)平移 front_med - back_med（对齐前段基线）
+- segment   分段偏移：只平移 [cut_start, cut_end] 窗口内 cue，幅度 -shift（区段中位）
 - end_short End 偏短：每条 Dialogue 的 End 延长 -end_med（Start 不动）
 
 无修复（no_ass/no_eng_track/no_match/ok/slight）不落刀，直接报告。
@@ -16,11 +17,12 @@ import os
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
-from .ass import parse_ass, shift_ass_file, extend_ends_ass_file
+from .ass import (parse_ass, shift_ass_file, shift_window_ass_file,
+                  extend_ends_ass_file)
 from .inspect import CUT, EpResult
 
 # 需要落刀修复的 verdict
-FIXABLE = ("uniform", "break", "end_short")
+FIXABLE = ("uniform", "break", "segment", "end_short")
 # 复检验收：这些判定视为"已闭环"
 DONE_VERDICTS = ("ok", "slight")
 
@@ -28,9 +30,11 @@ DONE_VERDICTS = ("ok", "slight")
 @dataclass
 class FixAction:
     """一次原子修复操作。"""
-    kind: str                     # uniform | break | end_extend
+    kind: str                     # uniform | break | segment | end_extend
     shift: float                  # 平移/延长秒数
     cut: Optional[float] = None   # break 用：只动 start >= cut 的后段
+    cut_start: Optional[float] = None  # segment 用：窗口左界（s）
+    cut_end: Optional[float] = None    # segment 用：窗口右界（s）
 
 
 @dataclass
@@ -51,6 +55,11 @@ def plan_fix(r: EpResult) -> list[FixAction]:
     if r.verdict == "break" and r.front_med is not None and r.back_med is not None:
         # 后段对齐前段基线：back 需要移 front_med - back_med
         return [FixAction("break", r.front_med - r.back_med, cut=CUT)]
+    if r.verdict == "segment" and r.seg_shift is not None \
+            and r.seg_cut_start is not None and r.seg_cut_end is not None:
+        # 区内 cue 平移 -shift（把区段中位偏移归零）；只动 [cut_start, cut_end]
+        return [FixAction("segment", -r.seg_shift,
+                          cut_start=r.seg_cut_start, cut_end=r.seg_cut_end)]
     if r.verdict == "end_short" and r.end_med is not None:
         return [FixAction("end_extend", -r.end_med)]
     return []
@@ -63,6 +72,9 @@ def apply_fix(ass_path: str, actions: list[FixAction]) -> int:
         cues = parse_ass(ass_path)  # 每步重新解析，保证基于当前文件状态
         if act.kind == "end_extend":
             changed += extend_ends_ass_file(ass_path, cues, act.shift)
+        elif act.kind == "segment":
+            changed += shift_window_ass_file(
+                ass_path, cues, act.shift, act.cut_start, act.cut_end)
         else:
             changed += shift_ass_file(ass_path, cues, act.shift, cut=act.cut)
     return changed

@@ -21,6 +21,7 @@ def _verdict_name(v: str) -> str:
     return {
         "ok": "OK",
         "break": "片中断裂",
+        "segment": "分段偏移",
         "uniform": "均匀错轴",
         "end_short": "End偏短",
         "slight": "轻微",
@@ -28,6 +29,16 @@ def _verdict_name(v: str) -> str:
         "no_eng_track": "无英轨",
         "no_match": "无法匹配",
     }.get(v, v)
+
+
+def _seg_json(r) -> dict:
+    """segment 区段字段（仅 verdict=segment 时调用，字段已保证非空）。"""
+    return {
+        "seg_cut_start": round(r.seg_cut_start, 3),
+        "seg_cut_end": round(r.seg_cut_end, 3),
+        "seg_shift": round(r.seg_shift, 3),
+        "seg_n": r.seg_n,
+    }
 
 
 def cmd_inspect(args, cfg) -> int:
@@ -53,6 +64,7 @@ def cmd_inspect(args, cfg) -> int:
             "n_cues": r.n_cues, "n_matched": r.n_matched,
             "start_med": r.start_med, "end_med": r.end_med,
             "front_med": r.front_med, "back_med": r.back_med,
+            **({} if r.verdict != "segment" else _seg_json(r)),
         } for r in results]
         print(json.dumps(out, ensure_ascii=False, indent=2))
         return 0
@@ -65,11 +77,13 @@ def cmd_inspect(args, cfg) -> int:
         cues = r.n_cues if r.has_ass else "-"
         mch = r.n_matched if r.has_ass else "-"
         print(f"{ep:<10} {_verdict_name(r.verdict):<10} {str(cues):>5} {str(mch):>4} "
-              f"{f(r.start_med):>7} {f(r.end_med):>7} {f(r.front_med):>7} {f(r.back_med):>7}")
+              f"{f(r.start_med):>7} {f(r.end_med):>7} {f(r.front_med):>7} {f(r.back_med):>7}"
+              + (f"  [{r.seg_cut_start:.0f}-{r.seg_cut_end:.0f}s "
+                 f"shift={r.seg_shift:+.2f}]" if r.verdict == "segment" else ""))
     # 汇总
     from collections import Counter
     cnt = Counter(r.verdict for r in results)
-    bad = [v for v in ("no_ass", "break", "uniform", "end_short") if cnt[v]]
+    bad = [v for v in ("no_ass", "break", "segment", "uniform", "end_short") if cnt[v]]
     ok_n = cnt["ok"] + cnt["slight"]
     print(f"\n共 {len(results)} 集：OK/轻微 {ok_n}，异常 {sum(cnt[v] for v in bad)}")
     if bad:
@@ -79,14 +93,21 @@ def cmd_inspect(args, cfg) -> int:
 
 def _fix_json(r: fix_mod.FixResult) -> dict:
     a = r.after
+    def _act(x):
+        d = {"kind": x.kind, "shift": round(x.shift, 3),
+             "cut": round(x.cut, 3) if x.cut is not None else None}
+        if x.kind == "segment":
+            d["cut_start"] = round(x.cut_start, 3)
+            d["cut_end"] = round(x.cut_end, 3)
+        return d
     return {
         "ep": _show_short(r.ep), "before": r.verdict,
-        "actions": [{"kind": x.kind, "shift": round(x.shift, 3),
-                     "cut": x.cut} for x in r.actions],
+        "actions": [_act(x) for x in r.actions],
         "changed": r.changed, "done": r.done,
         "after": ({"verdict": a.verdict, "start_med": a.start_med,
                    "end_med": a.end_med, "front_med": a.front_med,
-                   "back_med": a.back_med}
+                   "back_med": a.back_med,
+                   **({} if a.verdict != "segment" else _seg_json(a))}
                   if a is not None else None),
     }
 
