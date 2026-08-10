@@ -182,12 +182,20 @@ def _eval_cond(cond: list, context: dict) -> bool:
         return False
     op = cond[0]
     if op == "not":
+        if len(cond) < 2:
+            raise TemplateError(f"{{{{ if {op} }}}} 缺操作数")
         return not _truthy(_atom(cond[1], context))
     if op == "eq":
+        if len(cond) < 3:
+            raise TemplateError(f"{{{{ if {op} }}}} 需两个操作数")
         return _atom(cond[1], context) == _atom(cond[2], context)
     if op == "and":
+        if len(cond) < 2:
+            raise TemplateError(f"{{{{ if {op} }}}} 缺操作数")
         return all(_truthy(_atom(t, context)) for t in cond[1:])
     if op == "or":
+        if len(cond) < 2:
+            raise TemplateError(f"{{{{ if {op} }}}} 缺操作数")
         return any(_truthy(_atom(t, context)) for t in cond[1:])
     # bare variable / literal truthiness
     return _truthy(_atom(op, context))

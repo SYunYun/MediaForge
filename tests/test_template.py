@@ -119,3 +119,23 @@ class TestErrors:
     def test_unexpected_end(self):
         with pytest.raises(TemplateError):
             render("{{ end }}", CTX)
+
+
+class TestCondArityErrors:
+    """Y4：条件函数缺参必须抛干净的 TemplateError，而非裸 IndexError。"""
+
+    def test_eq_missing_arg(self):
+        with pytest.raises(TemplateError):
+            render("{{ if eq .Result.x }}y{{ end }}", CTX)
+
+    def test_not_missing_arg(self):
+        with pytest.raises(TemplateError):
+            render("{{ if not }}y{{ end }}", CTX)
+
+    def test_and_missing_arg(self):
+        with pytest.raises(TemplateError):
+            render("{{ if and }}y{{ end }}", CTX)
+
+    def test_or_missing_arg(self):
+        with pytest.raises(TemplateError):
+            render("{{ if or }}y{{ end }}", CTX)

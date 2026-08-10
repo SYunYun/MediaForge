@@ -11,7 +11,7 @@ from __future__ import annotations
 import datetime as _dt
 import os
 import urllib.parse
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Optional
 
 import requests
@@ -332,9 +332,13 @@ def search(
             base = config.get("sitelink") or (definition.links[0] if definition.links else "")
             url = base.rstrip("/") + "/" + url.lstrip("/")
         # 路径段做 URL 编码（requests 只编 query 不编 path；关键词含空格会炸）。
-        # 只编码 path 段，query/fragment 原样保留交给 requests
+        # 只编码 path 段，query/fragment 原样保留交给 requests。
+        # 先 unquote 再 quote：避免渲染后已含 %xx 编码的段被二次编码（%20 -> %2520 -> 404）。
         _parts = urllib.parse.urlsplit(url)
-        _enc_path = "/".join(urllib.parse.quote(seg, safe="") for seg in _parts.path.split("/"))
+        _enc_path = "/".join(
+            urllib.parse.quote(urllib.parse.unquote(seg), safe="")
+            for seg in _parts.path.split("/")
+        )
         url = urllib.parse.urlunsplit((_parts.scheme, _parts.netloc, _enc_path, _parts.query, _parts.fragment))
         inputs = dict(spec.inputs)
         inputs.update(spath.inputs)
@@ -356,9 +360,13 @@ def search(
             except ValueError as exc:
                 raise EngineError(f"invalid JSON from {url}: {exc}") from exc
             # rows/字段选择器本身可能是模板（如 TPB 的 ${{ if .Config.uploader }}...{{ end }}）
-            if isinstance(spec.rows.selector, str) and "{{" in spec.rows.selector:
-                spec.rows.selector = _template.render(spec.rows.selector, context)
-            rows = _json_rows(payload, spec.rows)
+            # 渲染到副本，绝不原地改 spec.rows —— 保持 Definition 幂等（派生不记忆）
+            rows_spec = spec.rows
+            if isinstance(rows_spec.selector, str) and "{{" in rows_spec.selector:
+                rows_spec = replace(
+                    rows_spec, selector=_template.render(rows_spec.selector, context)
+                )
+            rows = _json_rows(payload, rows_spec)
         else:
             soup = BeautifulSoup(resp.text, "html.parser")
             rows = _html_rows(soup, spec.rows)
