@@ -38,7 +38,7 @@ def _recheck(path: str, sdh, ep="E1"):
 
 
 def _sdh_series(base: float) -> list:
-    return [(base + i, base + 3.0 + i, t) for i, t in enumerate(_TEXTS)]
+    return [(base + i * 4.0, base + 3.0 + i * 4.0, t) for i, t in enumerate(_TEXTS)]
 
 
 # ---------------------------------------------------------------------------
@@ -196,3 +196,21 @@ def test_fix_series_real_dryrun_plans(tmp_path):
     results = fixmod.fix_series(str(season), dry_run=True, inspect_ep=fake_inspect)
     assert results[0].actions and results[0].actions[0].kind == "uniform"
     assert ass.read_text(encoding="utf-8") == original
+
+# ---------------------------------------------------------------------------
+# 防叠屏回归（E07 事故：end_extend 全片延长导致相邻对白叠屏半屏）
+# ---------------------------------------------------------------------------
+
+def test_end_extend_no_overlap(tmp_path):
+    """首尾相接的对白，end_extend 后不得与下一条同轨 cue 重叠。"""
+    sdh = _sdh_series(10.0)  # 4s 间隔、3s 长、1s 缝隙
+    ass_file = tmp_path / "E1.ass"
+    _write_ass(str(ass_file), [(s, e - 1.0, t) for (s, e, t) in sdh])
+    before = inspect_with_sdh(str(ass_file), sdh, ep="E1", mkv="E1.mkv")
+    res = fixmod.fix_episode(str(ass_file), before, _recheck(str(ass_file), sdh))
+    assert res.actions[0].kind == "end_extend"
+    cues = parse_ass(str(ass_file))
+    body = sorted((c for c in cues if c.is_dialogue), key=lambda c: c.start)
+    for prev, nxt in zip(body, body[1:]):
+        assert prev.end <= nxt.start + 1e-9, \
+            f"叠屏: [{prev.start}-{prev.end}] 压着 [{nxt.start}-{nxt.end}]"

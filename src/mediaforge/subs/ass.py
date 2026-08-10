@@ -171,12 +171,28 @@ def shift_window_ass_file(path: str, cue_list: list[AssCue], shift: float,
 
 
 def extend_ends_ass_file(path: str, cue_list: list[AssCue], delta: float,
-                         min_dur: float = 0.05) -> int:
+                         min_dur: float = 0.05, gap: float = 0.01) -> int:
     """把每条 Dialogue 的 End 延长 delta 秒（Start 不动）—— End 偏短修复。
 
     复检用的是 End 中位差，末段延长只改 End、保留 Start，保证对齐不受扰动。
-    End 延长后不得越过 Start（钳到至少 min_dur 时长）。返回修改行数。
+    End 延长后不得越过 Start（钳到至少 min_dur 时长）。
+    关键钳制：延长不得越过"下一条同 style cue 的 Start - gap"——
+    否则相邻对白互相叠屏（E07 事故：全片延长 0.72s 后屏幕堆半屏）。
+    该钳制同时自动限幅：中段对白间隔小，只能延到缝隙宽；
+    末段无后继 cue 的才能真正延满 delta——恰好贴合 end_short 语义。
+    返回修改行数。
     """
+    # 同 style 的下一条 cue start，用于钳制叠屏
+    next_start: dict[int, float] = {}
+    by_style: dict[str, list[AssCue]] = {}
+    for c in cue_list:
+        if c.is_dialogue:
+            by_style.setdefault(c.style, []).append(c)
+    for group in by_style.values():
+        group.sort(key=lambda c: c.start)
+        for prev, nxt in zip(group, group[1:]):
+            next_start[prev.line_idx] = nxt.start
+
     lines = open(path, encoding="utf-8", errors="ignore").readlines()
     changed = 0
     for cue in cue_list:
@@ -188,6 +204,9 @@ def extend_ends_ass_file(path: str, cue_list: list[AssCue], delta: float,
         new_end = cue.end + delta
         if new_end < cue.start + min_dur:
             new_end = cue.start + min_dur
+        limit = next_start.get(cue.line_idx)
+        if limit is not None and new_end > limit - gap:
+            new_end = max(cue.start + min_dur, limit - gap)
         parts[2] = sec2ts(new_end)
         lines[cue.line_idx] = ",".join(parts)
         changed += 1
