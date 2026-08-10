@@ -108,11 +108,35 @@ def parse_srt(path: str) -> list[tuple[float, float, str]]:
 
 
 def extract_eng_track(mkv: str, out_srt: str) -> None:
-    """提取 mkv 内嵌英轨（0:s:0）到 SRT。"""
+    """提取 mkv 内嵌英轨到 SRT。
+
+    不能硬编码 0:s:0——S08 前 9 集首条字幕轨是俄语，抓错轨会导致
+    对齐基准全错（误判 no_match/break）。用 ffprobe 按 language=eng
+    定位真实英轨索引，找不到再回退 0:s:0。
+    """
+    import json
     import subprocess
+
+    track_idx = None
+    try:
+        probe = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "s",
+             "-show_entries", "stream=index:stream_tags=language",
+             "-of", "json", mkv],
+            capture_output=True, text=True, check=True,
+        )
+        for s in json.loads(probe.stdout).get("streams", []):
+            lang = (s.get("tags") or {}).get("language", "")
+            if lang.lower().startswith("eng"):
+                track_idx = s["index"]
+                break
+    except Exception:
+        track_idx = None
+
+    map_spec = f"0:{track_idx}" if track_idx is not None else "0:s:0"
     subprocess.run(
         ["ffmpeg", "-y", "-loglevel", "error", "-i", mkv,
-         "-map", "0:s:0", "-c:s", "srt", out_srt],
+         "-map", map_spec, "-c:s", "srt", out_srt],
         check=True,
     )
 
