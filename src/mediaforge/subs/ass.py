@@ -145,3 +145,29 @@ def shift_ass_file(path: str, cue_list: list[AssCue], shift: float,
     with open(path, "w", encoding="utf-8") as f:
         f.writelines(lines)
     return changed
+
+
+def extend_ends_ass_file(path: str, cue_list: list[AssCue], delta: float,
+                         min_dur: float = 0.05) -> int:
+    """把每条 Dialogue 的 End 延长 delta 秒（Start 不动）—— End 偏短修复。
+
+    复检用的是 End 中位差，末段延长只改 End、保留 Start，保证对齐不受扰动。
+    End 延长后不得越过 Start（钳到至少 min_dur 时长）。返回修改行数。
+    """
+    lines = open(path, encoding="utf-8", errors="ignore").readlines()
+    changed = 0
+    for cue in cue_list:
+        if not cue.is_dialogue:
+            continue
+        parts = cue.raw.split(",", 9)
+        if len(parts) < 10:
+            continue
+        new_end = cue.end + delta
+        if new_end < cue.start + min_dur:
+            new_end = cue.start + min_dur
+        parts[2] = sec2ts(new_end)
+        lines[cue.line_idx] = ",".join(parts)
+        changed += 1
+    with open(path, "w", encoding="utf-8") as f:
+        f.writelines(lines)
+    return changed

@@ -8,9 +8,10 @@
 模块组成：
 - ass.py       ASS/SRT 解析 + 时间工具
 - inspect.py   体检器（Start/End 双检 + 断裂/End偏短判定）
+- fix.py       自动修复 + 复检闭环（uniform/break/end_short，幂等）
 - ledger.py    台账（每季每集状态持久化）
 - media.py     媒体库接口抽象层（先 filesystem，留 jellyfin 位）
 """
 from __future__ import annotations
 
-SUBS_VERSION = "0.1.0"
+SUBS_VERSION = "0.2.0"

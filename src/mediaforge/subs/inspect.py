@@ -102,7 +102,15 @@ def inspect_episode(mkv: str, ass_path: str, srt_tmp: str = "/tmp/mf_subs_sdh.sr
         ass_cues = parse_ass(ass_path)
         return EpResult(ep=ep, mkv=mkv, has_ass=True, n_cues=len(ass_cues),
                         verdict="no_eng_track")
+    return inspect_with_sdh(ass_path, sdh, ep=ep, mkv=mkv)
 
+
+def inspect_with_sdh(ass_path: str, sdh: list[tuple[float, float, str]],
+                     ep: str = "", mkv: str = "") -> EpResult:
+    """给定 ASS 与 SDH 英轨内容做内容匹配+判定（不依赖 mkv/ffmpeg）。
+
+    供 fix 闭环复检 & 单测使用：把 ffmpeg 提取英轨与"匹配+判定"解耦。
+    """
     ass_cues = parse_ass(ass_path)
     matched = _match_sdh(ass_cues, sdh)
     if not matched:

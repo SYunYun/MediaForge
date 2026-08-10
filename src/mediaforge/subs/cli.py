@@ -7,6 +7,7 @@ from typing import Optional
 
 from . import inspect as inspect_mod
 from . import ledger as ledger_mod
+from . import fix as fix_mod
 from .media import get_adapter
 
 
@@ -74,6 +75,74 @@ def cmd_inspect(args, cfg) -> int:
     if bad:
         print("异常分布: " + ", ".join(f"{_verdict_name(v)}×{cnt[v]}" for v in bad))
     return 0 if not bad else 1
+
+
+def _fix_json(r: fix_mod.FixResult) -> dict:
+    a = r.after
+    return {
+        "ep": _show_short(r.ep), "before": r.verdict,
+        "actions": [{"kind": x.kind, "shift": round(x.shift, 3),
+                     "cut": x.cut} for x in r.actions],
+        "changed": r.changed, "done": r.done,
+        "after": ({"verdict": a.verdict, "start_med": a.start_med,
+                   "end_med": a.end_med, "front_med": a.front_med,
+                   "back_med": a.back_med}
+                  if a is not None else None),
+    }
+
+
+def cmd_fix(args, cfg) -> int:
+    """自动修复 + 复检闭环。--dry-run 只报告不落刀。"""
+    adapter = get_adapter(cfg)
+    season_dir = adapter.locate_series(args.show, args.season)
+    if not season_dir:
+        print(f"找不到 {args.show} {args.season}（media.root={cfg.get('subs',{}).get('media',{}).get('root')}）",
+              file=sys.stderr)
+        return 2
+    suffix = (cfg.get("subs", {}).get("naming", {})
+              .get("ass_suffix", ".default.chi.zh-cn.ass"))
+    results = fix_mod.fix_series(season_dir, suffix, dry_run=args.dry_run)
+
+    # 复检结果写回台账；done 才设 done=true（闭环）
+    if not args.dry_run:
+        for r in results:
+            ep_key = _show_short(r.ep)
+            a = r.after
+            ledger_mod.update_episode(
+                args.show, args.season, ep_key,
+                verdict=a.verdict if a else r.verdict,
+                done=r.done,
+                fix_before=r.verdict,
+                fix_actions=[x.kind for x in r.actions],
+                fix_changed=r.changed,
+                n_cues=(a.n_cues if a else None),
+                n_matched=(a.n_matched if a else None),
+                start_med=(a.start_med if a else None),
+                end_med=(a.end_med if a else None),
+                front_med=(a.front_med if a else None),
+                back_med=(a.back_med if a else None),
+            )
+
+    if args.json:
+        print(json.dumps([_fix_json(r) for r in results],
+                         ensure_ascii=False, indent=2))
+        return 0
+
+    # 人类表格
+    mode = "DRY-RUN" if args.dry_run else "FIX"
+    print(f"[{mode}] 修复 + 复检 · {args.show} {args.season}")
+    print(f"{'集':<10} {'修复前':<10} {'操作':<24} {'改行':>4} {'复检':<8}")
+    for r in results:
+        op = "+".join(x.kind for x in r.actions) if r.actions else "-"
+        after_v = r.after.verdict if r.after else "-"
+        done_s = "✔ done" if r.done else ("待人工" if r.actions else "无需")
+        print(f"{_show_short(r.ep):<10} {_verdict_name(r.verdict):<10} "
+              f"{op:<24} {r.changed:>4} {done_s:<8} ({after_v})")
+    done_n = sum(1 for r in results if r.done)
+    fixable = [r for r in results if r.actions]
+    print(f"\n共 {len(results)} 集：已闭环 {done_n}，需修复 {len(fixable)}"
+          + ("" if args.dry_run else "（未闭环标'待人工'）"))
+    return 0 if not fixable else 1
 
 
 def cmd_ledger(args, cfg) -> int:

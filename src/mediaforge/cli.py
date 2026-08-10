@@ -303,6 +303,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_ledger.add_argument("--json", action="store_true")
     p_ledger.set_defaults(func=subs_cli.cmd_ledger)
 
+    p_fix = ssub.add_parser("fix", help="自动修复 + 复检闭环（幂等，--dry-run 只报告）")
+    p_fix.add_argument("show")
+    p_fix.add_argument("season")
+    p_fix.add_argument("--dry-run", action="store_true",
+                       help="只报告将要做什么，不改文件")
+    p_fix.add_argument("--json", action="store_true")
+    p_fix.set_defaults(func=subs_cli.cmd_fix)
+
     return parser
 
 
