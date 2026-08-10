@@ -16,9 +16,14 @@ JellyfinAdapter 留作下一步（刷新/入库触发）。
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+
+# 季目录名：`S01` / `Season 01`（大小写不敏感）。必须整段匹配——
+# 绝不能命中 "Severance" / "Suits" 这类以 S 开头的剧名。
+_SEASON_DIR_RE = re.compile(r"^(?:S\d+|Season\s+\d+)$", re.IGNORECASE)
 
 
 @dataclass
@@ -60,12 +65,14 @@ class FilesystemAdapter(BaseMediaAdapter):
         ]
         for c in candidates:
             if c.is_dir():
-                # 若已到季目录直接返回；否则查 season 子目录
-                if c.name.upper().startswith("S") or c.name.lower() == season.lower():
-                    return str(c)
+                # 先精确匹配 season 子目录（覆盖 base/show 这种剧根目录）
                 sub = c / season
                 if sub.is_dir():
                     return str(sub)
+                # 候选本身已是季目录（Season 01 / S01）直接返回；
+                # 用整段正则判季，避免 S 开头剧名（Severance 等）被误判为季目录
+                if _SEASON_DIR_RE.match(c.name):
+                    return str(c)
         # 兜底：递归浅找"Season XX"目录
         if (base / show).is_dir():
             for d in (base / show).iterdir():

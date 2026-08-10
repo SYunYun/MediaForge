@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any, Optional
 
@@ -20,8 +21,14 @@ def ledger_dir() -> Path:
 
 
 def _key(show: str, season: str) -> str:
-    # 规范化：小写、去符号，防跨平台路径问题
-    return f"{show.lower().replace(' ', '_')}__{season.lower().replace(' ', '_')}"
+    # 规范化：小写、去符号，防跨平台路径问题。非法文件名字符（/ \ : * ? " < > |）
+    # 一律折叠成下划线，避免含 "/" 的剧名造成子目录穿越 / FileNotFoundError。
+    def _clean(s: str) -> str:
+        s = str(s).lower()
+        s = re.sub(r"[^a-z0-9_]+", "_", s)
+        return s.strip("_")
+
+    return f"{_clean(show)}__{_clean(season)}"
 
 
 def load_ledger(show: str, season: str) -> dict:
