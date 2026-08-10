@@ -90,11 +90,14 @@ class QbitClient:
         self._login()
 
     def _login(self):
-        resp = self.s.post(
-            f"{self.url}/api/v2/auth/login",
-            data={"username": self.username, "password": self.password},
-            timeout=self.timeout,
-        )
+        try:
+            resp = self.s.post(
+                f"{self.url}/api/v2/auth/login",
+                data={"username": self.username, "password": self.password},
+                timeout=self.timeout,
+            )
+        except requests.RequestException as exc:
+            raise QbitError(f"qbit 连接失败: {exc}") from exc
         # 坑1：成功是 204 空 body；老版本才是文本 "Ok."
         if resp.status_code != 204 and "Ok." not in resp.text:
             raise QbitError(
@@ -112,8 +115,11 @@ class QbitClient:
         params = {}
         if hashes:
             params["hashes"] = "|".join(hashes)
-        resp = self._get("/torrents/info", params=params)
-        resp.raise_for_status()
+        try:
+            resp = self._get("/torrents/info", params=params)
+            resp.raise_for_status()
+        except requests.RequestException as exc:
+            raise QbitError(f"torrents/info 查询失败: {exc}") from exc
         return resp.json()
 
     def hash_set(self) -> set:
@@ -136,8 +142,11 @@ class QbitClient:
             data["category"] = category
         if savepath:
             data["savepath"] = translate_savepath(savepath, path_map)
-        resp = self._post("/torrents/add", data=data)
-        resp.raise_for_status()
+        try:
+            resp = self._post("/torrents/add", data=data)
+            resp.raise_for_status()
+        except requests.RequestException as exc:
+            raise QbitError(f"qbit add 失败: {exc}") from exc
         # 坑2：5.x 返回 JSON pending_count；老版本才是文本 "Ok."
         try:
             body = resp.json()

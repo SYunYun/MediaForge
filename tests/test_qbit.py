@@ -6,6 +6,7 @@
 import json
 
 import pytest
+import requests
 
 import mediaforge.feed.qbit as qmod
 from mediaforge.feed.qbit import (
@@ -201,3 +202,40 @@ class TestIdempotentAdd:
         delete_calls = [c for c in fake.calls if c[1].endswith("/torrents/delete")]
         assert delete_calls[0][2]["data"] == {
             "hashes": HASH_1, "deleteFiles": "false"}
+
+
+class TestNetworkErrorsWrapQbitError:
+    """Y1：requests 网络/HTTP 异常必须收口成 QbitError，保 --json 契约。"""
+
+    def test_login_connection_error_wrapped(self, monkeypatch):
+        class ConnErrSession(FakeSession):
+            def post(self, url, data=None, timeout=None, **kw):
+                if url.endswith("/auth/login"):
+                    raise requests.exceptions.ConnectionError("refused")
+                return super().post(url, data=data, timeout=timeout, **kw)
+
+        monkeypatch.setattr(qmod, "make_qbit_session", ConnErrSession)
+        with pytest.raises(QbitError):
+            _client()
+
+    def test_torrents_connection_error_wrapped(self, monkeypatch):
+        class ConnErrSession(FakeSession):
+            def get(self, url, params=None, timeout=None, **kw):
+                if url.endswith("/torrents/info"):
+                    raise requests.exceptions.ConnectionError("refused")
+                return super().get(url, params=params, timeout=timeout, **kw)
+
+        monkeypatch.setattr(qmod, "make_qbit_session", ConnErrSession)
+        with pytest.raises(QbitError):
+            _client().torrents()
+
+    def test_add_http_error_wrapped(self, monkeypatch):
+        class HttpErrSession(FakeSession):
+            def post(self, url, data=None, timeout=None, **kw):
+                if url.endswith("/torrents/add"):
+                    raise requests.exceptions.HTTPError("500 from qbit")
+                return super().post(url, data=data, timeout=timeout, **kw)
+
+        monkeypatch.setattr(qmod, "make_qbit_session", HttpErrSession)
+        with pytest.raises(QbitError):
+            _client()._add("magnet:?xt=urn:btih:" + HASH_2, False, None, None, [])
